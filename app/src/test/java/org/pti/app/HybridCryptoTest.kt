@@ -65,4 +65,28 @@ class HybridCryptoTest {
 
         assertArrayEquals(message, recovered)
     }
+
+    @Test
+    fun multiRecipient_eachHolderCanDecrypt() {
+        val mom = HybridCrypto.generateRecipient()
+        val friend = HybridCrypto.generateRecipient()
+        val message = "evidence for multiple trusted people".toByteArray()
+
+        val bundle = HybridCrypto.encryptToMany(
+            message,
+            listOf(HybridCrypto.exportPublicKeys(mom), HybridCrypto.exportPublicKeys(friend)),
+        )
+
+        assertArrayEquals(message, HybridCrypto.decryptFromMany(bundle, HybridCrypto.exportPrivateKeys(mom)))
+        assertArrayEquals(message, HybridCrypto.decryptFromMany(bundle, HybridCrypto.exportPrivateKeys(friend)))
+    }
+
+    @Test(expected = Exception::class)
+    fun multiRecipient_nonRecipientCannotDecrypt() {
+        val mom = HybridCrypto.generateRecipient()
+        val stranger = HybridCrypto.generateRecipient()
+        val bundle = HybridCrypto.encryptToMany("x".toByteArray(), listOf(HybridCrypto.exportPublicKeys(mom)))
+
+        HybridCrypto.decryptFromMany(bundle, HybridCrypto.exportPrivateKeys(stranger))
+    }
 }

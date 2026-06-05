@@ -165,6 +165,83 @@ object HybridCrypto {
         return decrypt(bundle, x, m)
     }
 
+    // --- Multi-recipient: one ciphertext that several key-holders can each open ---
+    private const val MULTI_VERSION = 2
+
+    /**
+     * Encrypts [plaintext] once, then wraps the file key separately for each recipient's
+     * public-key bundle. Any one of [publicBundles] (friend, family, lawyer, AI) can decrypt.
+     */
+    fun encryptToMany(plaintext: ByteArray, publicBundles: List<String>): ByteArray {
+        ensureProvider()
+        require(publicBundles.isNotEmpty()) { "At least one recipient is required" }
+        val rnd = SecureRandom()
+
+        val fileKey = ByteArray(32).also { rnd.nextBytes(it) }
+        val dataNonce = ByteArray(12).also { rnd.nextBytes(it) }
+        val dataCiphertext = aesGcm(Cipher.ENCRYPT_MODE, fileKey, dataNonce, plaintext)
+
+        val blocks = publicBundles.map { wrapKeyFor(it, fileKey, rnd) }
+        return pack(byteArrayOf(MULTI_VERSION.toByte()), dataNonce, dataCiphertext, *blocks.toTypedArray())
+    }
+
+    /** Decrypts a multi-recipient bundle with one holder's private-key bundle. */
+    fun decryptFromMany(bundle: ByteArray, privateBundle: String): ByteArray {
+        ensureProvider()
+        val parts = unpack(bundle)
+        require(parts.size >= 4 && parts[0].isNotEmpty() && parts[0][0].toInt() == MULTI_VERSION) {
+            "Unrecognized multi-recipient bundle"
+        }
+        val dataNonce = parts[1]
+        val dataCiphertext = parts[2]
+        val priv = unpack(Base64.getDecoder().decode(privateBundle))
+        val xPriv = KeyFactory.getInstance("X25519", PROVIDER).generatePrivate(PKCS8EncodedKeySpec(priv[0]))
+        val mPriv = KeyFactory.getInstance("ML-KEM", PROVIDER).generatePrivate(PKCS8EncodedKeySpec(priv[1]))
+
+        for (i in 3 until parts.size) {
+            val fileKey = runCatching { unwrapKeyWith(parts[i], xPriv, mPriv) }.getOrNull() ?: continue
+            return aesGcm(Cipher.DECRYPT_MODE, fileKey, dataNonce, dataCiphertext)
+        }
+        error("This key cannot open the file (not an authorized recipient)")
+    }
+
+    private fun wrapKeyFor(publicBundle: String, fileKey: ByteArray, rnd: SecureRandom): ByteArray {
+        val pub = unpack(Base64.getDecoder().decode(publicBundle))
+        val xPub = KeyFactory.getInstance("X25519", PROVIDER).generatePublic(X509EncodedKeySpec(pub[0]))
+        val mPub = KeyFactory.getInstance("ML-KEM", PROVIDER).generatePublic(X509EncodedKeySpec(pub[1]))
+
+        val ephemeral = KeyPairGenerator.getInstance("X25519", PROVIDER).generateKeyPair()
+        val ka = KeyAgreement.getInstance("X25519", PROVIDER)
+        ka.init(ephemeral.private)
+        ka.doPhase(xPub, true)
+        val s1 = ka.generateSecret()
+
+        val kg = KeyGenerator.getInstance("ML-KEM", PROVIDER)
+        kg.init(KEMGenerateSpec(mPub, "AES"), rnd)
+        val enc = kg.generateKey() as SecretKeyWithEncapsulation
+
+        val kek = hkdfSha256(s1 + enc.encoded, HKDF_INFO, 32)
+        val wrapNonce = ByteArray(12).also { rnd.nextBytes(it) }
+        val wrapped = aesGcm(Cipher.ENCRYPT_MODE, kek, wrapNonce, fileKey)
+        return pack(ephemeral.public.encoded, enc.encapsulation, wrapNonce, wrapped)
+    }
+
+    private fun unwrapKeyWith(block: ByteArray, xPriv: PrivateKey, mPriv: PrivateKey): ByteArray {
+        val b = unpack(block)
+        val ephPub = KeyFactory.getInstance("X25519", PROVIDER).generatePublic(X509EncodedKeySpec(b[0]))
+        val ka = KeyAgreement.getInstance("X25519", PROVIDER)
+        ka.init(xPriv)
+        ka.doPhase(ephPub, true)
+        val s1 = ka.generateSecret()
+
+        val kg = KeyGenerator.getInstance("ML-KEM", PROVIDER)
+        kg.init(KEMExtractSpec(mPriv, b[1], "AES"))
+        val dec = kg.generateKey() as SecretKeyWithEncapsulation
+
+        val kek = hkdfSha256(s1 + dec.encoded, HKDF_INFO, 32)
+        return aesGcm(Cipher.DECRYPT_MODE, kek, b[2], b[3])
+    }
+
     private fun aesGcm(mode: Int, key: ByteArray, nonce: ByteArray, input: ByteArray): ByteArray {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(mode, SecretKeySpec(key, "AES"), GCMParameterSpec(GCM_TAG_BITS, nonce))

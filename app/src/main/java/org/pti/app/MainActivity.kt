@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -31,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -80,6 +82,7 @@ fun HomeScreen(onOpenCamera: () -> Unit) {
     var count by remember { mutableStateOf(VaultCrypto.vaultCount(context)) }
     var token by remember { mutableStateOf(prefs.getString("yandex_token", "").orEmpty()) }
     var uploading by remember { mutableStateOf(false) }
+    var autoUpload by remember { mutableStateOf(prefs.getBoolean("auto_upload", false)) }
 
     Column(
         modifier = Modifier
@@ -141,6 +144,19 @@ fun HomeScreen(onOpenCamera: () -> Unit) {
             }
         ) { Text(if (uploading) "Uploading…" else "Upload all to Yandex Disk") }
 
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(
+                checked = autoUpload,
+                onCheckedChange = {
+                    autoUpload = it
+                    prefs.edit().putBoolean("auto_upload", it).apply()
+                }
+            )
+            Spacer(Modifier.height(0.dp))
+            Text("  Auto-upload new captures")
+        }
+
         Spacer(Modifier.height(24.dp))
         OutlinedButton(onClick = {
             val n = VaultCrypto.wipeVault(context)
@@ -154,6 +170,8 @@ fun HomeScreen(onOpenCamera: () -> Unit) {
 fun CameraScreen(onDone: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
+    val prefs = remember { context.getSharedPreferences("pti_prefs", Context.MODE_PRIVATE) }
 
     var hasPermission by remember {
         mutableStateOf(
@@ -212,10 +230,22 @@ fun CameraScreen(onDone: () -> Unit) {
                             val bytes = ByteArray(buffer.remaining())
                             buffer.get(bytes)
                             image.close()
-                            VaultCrypto.encryptToVault(
+                            val saved = VaultCrypto.encryptToVault(
                                 context, bytes, "IMG_${System.currentTimeMillis()}"
                             )
                             Toast.makeText(context, "Encrypted & secured", Toast.LENGTH_SHORT).show()
+
+                            // Auto-upload only if the box is on AND a token is set.
+                            val token = prefs.getString("yandex_token", "").orEmpty()
+                            if (prefs.getBoolean("auto_upload", false) && token.isNotBlank()) {
+                                scope.launch {
+                                    YandexUploader.ensureFolder(token, "/PTI")
+                                    val data = VaultCrypto.decryptFromVault(context, saved)
+                                    YandexUploader.upload(
+                                        token, "/PTI/${saved.nameWithoutExtension}.jpg", data
+                                    )
+                                }
+                            }
                             onDone()
                         }
 
