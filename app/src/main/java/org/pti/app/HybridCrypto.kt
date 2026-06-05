@@ -22,7 +22,9 @@ import javax.crypto.KeyGenerator
 import javax.crypto.Mac
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
+import java.util.Base64
 
 /**
  * Zero-knowledge hybrid encryption. The storage server only ever holds the bundle
@@ -129,6 +131,38 @@ object HybridCrypto {
         val kek = hkdfSha256(s1 + s2, HKDF_INFO, 32)
         val fileKey = aesGcm(Cipher.DECRYPT_MODE, kek, parts[3], parts[4])
         return aesGcm(Cipher.DECRYPT_MODE, fileKey, parts[5], parts[6])
+    }
+
+    // --- Key export / import (Base64 text the user backs up or hands to trusted family) ---
+
+    /** Public-key bundle: kept in the app; what files are encrypted to. Safe to share. */
+    fun exportPublicKeys(recipient: Recipient): String =
+        Base64.getEncoder().encodeToString(
+            pack(recipient.x25519.public.encoded, recipient.mlkem.public.encoded)
+        )
+
+    /** Private-key bundle: the ONLY thing that can decrypt. Back up offline; never upload. */
+    fun exportPrivateKeys(recipient: Recipient): String =
+        Base64.getEncoder().encodeToString(
+            pack(recipient.x25519.private.encoded, recipient.mlkem.private.encoded)
+        )
+
+    /** Encrypts to a public-key bundle from [exportPublicKeys]. */
+    fun encryptTo(plaintext: ByteArray, publicBundle: String): ByteArray {
+        ensureProvider()
+        val parts = unpack(Base64.getDecoder().decode(publicBundle))
+        val x = KeyFactory.getInstance("X25519", PROVIDER).generatePublic(X509EncodedKeySpec(parts[0]))
+        val m = KeyFactory.getInstance("ML-KEM", PROVIDER).generatePublic(X509EncodedKeySpec(parts[1]))
+        return encrypt(plaintext, x, m)
+    }
+
+    /** Decrypts using a private-key bundle from [exportPrivateKeys] (what family holds). */
+    fun decryptWith(bundle: ByteArray, privateBundle: String): ByteArray {
+        ensureProvider()
+        val parts = unpack(Base64.getDecoder().decode(privateBundle))
+        val x = KeyFactory.getInstance("X25519", PROVIDER).generatePrivate(PKCS8EncodedKeySpec(parts[0]))
+        val m = KeyFactory.getInstance("ML-KEM", PROVIDER).generatePrivate(PKCS8EncodedKeySpec(parts[1]))
+        return decrypt(bundle, x, m)
     }
 
     private fun aesGcm(mode: Int, key: ByteArray, nonce: ByteArray, input: ByteArray): ByteArray {

@@ -52,4 +52,17 @@ class HybridCryptoTest {
         // Decrypting with a different recipient's keys must fail (AES-GCM auth tag).
         HybridCrypto.decrypt(bundle, b.x25519.private, b.mlkem.private)
     }
+
+    @Test
+    fun exportedKeys_roundTrip() {
+        val recipient = HybridCrypto.generateRecipient()
+        val publicBundle = HybridCrypto.exportPublicKeys(recipient)
+        val privateBundle = HybridCrypto.exportPrivateKeys(recipient)
+
+        val message = "shared evidence via exported keys".toByteArray()
+        val bundle = HybridCrypto.encryptTo(message, publicBundle)
+        val recovered = HybridCrypto.decryptWith(bundle, privateBundle)
+
+        assertArrayEquals(message, recovered)
+    }
 }
