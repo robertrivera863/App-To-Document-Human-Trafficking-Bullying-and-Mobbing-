@@ -3,7 +3,6 @@ package org.pti.app
 import org.bouncycastle.jcajce.SecretKeyWithEncapsulation
 import org.bouncycastle.jcajce.spec.KEMExtractSpec
 import org.bouncycastle.jcajce.spec.KEMGenerateSpec
-import org.bouncycastle.jcajce.spec.MLKEMParameterSpec
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -63,9 +62,8 @@ object HybridCrypto {
     fun generateRecipient(): Recipient {
         ensureProvider()
         val x = KeyPairGenerator.getInstance("X25519", PROVIDER).generateKeyPair()
-        val kpg = KeyPairGenerator.getInstance("ML-KEM", PROVIDER)
-        kpg.initialize(MLKEMParameterSpec.ml_kem_768)
-        val m = kpg.generateKeyPair()
+        // Parameterized algorithm name avoids needing a version-specific ParameterSpec class.
+        val m = KeyPairGenerator.getInstance("ML-KEM-768", PROVIDER).generateKeyPair()
         return Recipient(x, m)
     }
 

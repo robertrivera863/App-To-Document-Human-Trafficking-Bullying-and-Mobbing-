@@ -160,7 +160,11 @@ fun HomeScreen(onOpenCamera: () -> Unit, onManageKeys: () -> Unit, onOpenViewer:
                     var fail = 0
                     for (file in VaultCrypto.listVault(context)) {
                         val plain = runCatching { VaultCrypto.decryptFromVault(context, file) }
-                            .getOrNull() ?: run { fail++; continue }
+                            .getOrNull()
+                        if (plain == null) {
+                            fail++
+                            continue
+                        }
                         val sealed = HybridCrypto.encryptToMany(plain, recipients)
                         val remote = "/PTI/${file.nameWithoutExtension}.ptq"
                         if (YandexUploader.upload(t, remote, sealed).isSuccess) ok++ else fail++
