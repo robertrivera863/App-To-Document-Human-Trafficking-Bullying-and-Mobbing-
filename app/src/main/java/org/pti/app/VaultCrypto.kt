@@ -60,8 +60,11 @@ object VaultCrypto {
         return aead(context).decrypt(file.readBytes(), name.toByteArray())
     }
 
-    fun vaultCount(context: Context): Int =
-        vaultDir(context).listFiles { f -> f.extension == "enc" }?.size ?: 0
+    fun vaultCount(context: Context): Int = listVault(context).size
+
+    /** Lists the encrypted files currently in the vault. */
+    fun listVault(context: Context): List<File> =
+        vaultDir(context).listFiles { f -> f.extension == "enc" }?.toList() ?: emptyList()
 
     /** Securely deletes all local copies. Copies already uploaded are unaffected. */
     fun wipeVault(context: Context): Int {

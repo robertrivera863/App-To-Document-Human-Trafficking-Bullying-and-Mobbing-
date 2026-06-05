@@ -50,4 +50,7 @@ dependencies {
 
     // On-device encryption (AES-256, quantum-resistant at rest)
     implementation("com.google.crypto.tink:tink-android:1.13.0")
+
+    // Background work for uploads
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }
