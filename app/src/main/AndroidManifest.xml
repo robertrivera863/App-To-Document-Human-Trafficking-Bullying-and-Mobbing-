@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
     <application
         android:allowBackup="false"
-        android:label="Calculator"
+        android:label="PTI"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 

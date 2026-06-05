@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "org.safewitness.app"
+    namespace = "org.pti.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "org.safewitness.app"
+        applicationId = "org.pti.app"
         minSdk = 24
         targetSdk = 34
         versionCode = 1
@@ -40,4 +40,14 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
+
+    // Camera (CameraX)
+    implementation("androidx.camera:camera-core:1.3.4")
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("androidx.camera:camera-view:1.3.4")
+
+    // On-device encryption (AES-256, quantum-resistant at rest)
+    implementation("com.google.crypto.tink:tink-android:1.13.0")
 }

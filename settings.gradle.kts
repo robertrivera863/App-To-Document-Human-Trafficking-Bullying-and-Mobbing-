@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "SafeWitness"
+rootProject.name = "ProtectionForTargetIndividuals"
 include(":app")
