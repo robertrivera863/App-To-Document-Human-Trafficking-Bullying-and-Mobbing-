@@ -3,6 +3,7 @@ package org.pti.app
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -16,6 +17,7 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +47,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -74,15 +78,17 @@ fun AppRoot() {
     when (screen) {
         "camera" -> CameraScreen(onDone = { screen = "home" })
         "recipients" -> RecipientsScreen(onBack = { screen = "home" })
+        "view" -> ViewScreen(onBack = { screen = "home" })
         else -> HomeScreen(
             onOpenCamera = { screen = "camera" },
             onManageKeys = { screen = "recipients" },
+            onOpenViewer = { screen = "view" },
         )
     }
 }
 
 @Composable
-fun HomeScreen(onOpenCamera: () -> Unit, onManageKeys: () -> Unit) {
+fun HomeScreen(onOpenCamera: () -> Unit, onManageKeys: () -> Unit, onOpenViewer: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("pti_prefs", Context.MODE_PRIVATE) }
@@ -91,6 +97,7 @@ fun HomeScreen(onOpenCamera: () -> Unit, onManageKeys: () -> Unit) {
     var token by remember { mutableStateOf(prefs.getString("yandex_token", "").orEmpty()) }
     var uploading by remember { mutableStateOf(false) }
     var autoUpload by remember { mutableStateOf(prefs.getBoolean("auto_upload", false)) }
+    var panicCode by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -115,6 +122,8 @@ fun HomeScreen(onOpenCamera: () -> Unit, onManageKeys: () -> Unit) {
         Button(onClick = onOpenCamera) { Text("Secure a photo") }
         Spacer(Modifier.height(8.dp))
         OutlinedButton(onClick = onManageKeys) { Text("Who can access (keys)") }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = onOpenViewer) { Text("View / decrypt evidence") }
 
         Spacer(Modifier.height(24.dp))
         Text("Yandex Disk (optional)", style = MaterialTheme.typography.titleMedium)
@@ -183,6 +192,29 @@ fun HomeScreen(onOpenCamera: () -> Unit, onManageKeys: () -> Unit) {
             count = VaultCrypto.vaultCount(context)
             Toast.makeText(context, "Wiped $n file(s) from this phone", Toast.LENGTH_SHORT).show()
         }) { Text("Wipe vault on this phone") }
+
+        Spacer(Modifier.height(24.dp))
+        Text("Emergency", style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(
+            value = panicCode,
+            onValueChange = {
+                panicCode = it
+                if (it.trim() == "77") {
+                    VaultCrypto.panicWipe(context)
+                    count = 0
+                    token = ""
+                    autoUpload = false
+                    panicCode = ""
+                    Toast.makeText(
+                        context,
+                        "All local data wiped. Uploaded evidence is safe in the cloud.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            },
+            label = { Text("Enter 77 to wipe this phone") },
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
@@ -375,5 +407,78 @@ fun RecipientsScreen(onBack: () -> Unit) {
                 TextButton(onClick = { privateKeyToShow = null }) { Text("Close") }
             }
         )
+    }
+}
+
+@Composable
+fun ViewScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    var privateKey by remember { mutableStateOf("") }
+    var image by remember { mutableStateOf<ImageBitmap?>(null) }
+    var status by remember { mutableStateOf("") }
+
+    val picker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        image = null
+        if (uri == null) return@rememberLauncherForActivityResult
+        if (privateKey.isBlank()) {
+            status = "Paste your private key first."
+            return@rememberLauncherForActivityResult
+        }
+        try {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: throw IllegalStateException("Could not read the file")
+            val plain = HybridCrypto.decryptFromMany(bytes, privateKey.trim())
+            val bmp = BitmapFactory.decodeByteArray(plain, 0, plain.size)
+            if (bmp != null) {
+                image = bmp.asImageBitmap()
+                status = "Decrypted successfully."
+            } else {
+                status = "Decrypted, but this isn't an image file."
+            }
+        } catch (e: Exception) {
+            status = "Could not decrypt: ${e.message}"
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+    ) {
+        Text("View / decrypt evidence", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(8.dp))
+        Text("Paste your private key, then pick a downloaded .ptq file to open it.")
+
+        Spacer(Modifier.height(16.dp))
+        OutlinedTextField(
+            value = privateKey,
+            onValueChange = { privateKey = it },
+            label = { Text("Your private key") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = { picker.launch("*/*") }
+        ) { Text("Pick a file to decrypt") }
+
+        if (status.isNotBlank()) {
+            Spacer(Modifier.height(12.dp))
+            Text(status)
+        }
+        image?.let {
+            Spacer(Modifier.height(12.dp))
+            Image(
+                bitmap = it,
+                contentDescription = "Decrypted evidence",
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
+        OutlinedButton(onClick = onBack) { Text("Done") }
     }
 }

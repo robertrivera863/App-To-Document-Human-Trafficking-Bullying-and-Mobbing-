@@ -73,4 +73,17 @@ object VaultCrypto {
         files.forEach { if (it.delete()) deleted++ }
         return deleted
     }
+
+    /**
+     * Panic wipe ("77"): erases everything on THIS phone — the encrypted vault, the
+     * local encryption key, the saved token, and the recipient list. Evidence already
+     * uploaded to the cloud survives and is still decryptable by the key-holders.
+     */
+    fun panicWipe(context: Context) {
+        wipeVault(context)
+        listOf("pti_prefs", "pti_recipients", PREF_FILE).forEach { name ->
+            context.getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear().apply()
+        }
+        cached = null
+    }
 }
