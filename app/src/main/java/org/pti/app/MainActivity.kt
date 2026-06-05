@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -34,6 +35,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,7 +45,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -69,12 +73,16 @@ fun AppRoot() {
     var screen by remember { mutableStateOf("home") }
     when (screen) {
         "camera" -> CameraScreen(onDone = { screen = "home" })
-        else -> HomeScreen(onOpenCamera = { screen = "camera" })
+        "recipients" -> RecipientsScreen(onBack = { screen = "home" })
+        else -> HomeScreen(
+            onOpenCamera = { screen = "camera" },
+            onManageKeys = { screen = "recipients" },
+        )
     }
 }
 
 @Composable
-fun HomeScreen(onOpenCamera: () -> Unit) {
+fun HomeScreen(onOpenCamera: () -> Unit, onManageKeys: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("pti_prefs", Context.MODE_PRIVATE) }
@@ -105,6 +113,8 @@ fun HomeScreen(onOpenCamera: () -> Unit) {
 
         Spacer(Modifier.height(24.dp))
         Button(onClick = onOpenCamera) { Text("Secure a photo") }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = onManageKeys) { Text("Who can access (keys)") }
 
         Spacer(Modifier.height(24.dp))
         Text("Yandex Disk (optional)", style = MaterialTheme.typography.titleMedium)
@@ -124,6 +134,15 @@ fun HomeScreen(onOpenCamera: () -> Unit) {
         Button(
             enabled = token.isNotBlank() && !uploading,
             onClick = {
+                val recipients = RecipientStore.publicBundles(context)
+                if (recipients.isEmpty()) {
+                    Toast.makeText(
+                        context,
+                        "Add at least one person under \"Who can access\" first",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@Button
+                }
                 uploading = true
                 scope.launch {
                     val t = token.trim()
@@ -131,10 +150,11 @@ fun HomeScreen(onOpenCamera: () -> Unit) {
                     var ok = 0
                     var fail = 0
                     for (file in VaultCrypto.listVault(context)) {
-                        val bytes = runCatching { VaultCrypto.decryptFromVault(context, file) }
+                        val plain = runCatching { VaultCrypto.decryptFromVault(context, file) }
                             .getOrNull() ?: run { fail++; continue }
-                        val remote = "/PTI/${file.nameWithoutExtension}.jpg"
-                        if (YandexUploader.upload(t, remote, bytes).isSuccess) ok++ else fail++
+                        val sealed = HybridCrypto.encryptToMany(plain, recipients)
+                        val remote = "/PTI/${file.nameWithoutExtension}.ptq"
+                        if (YandexUploader.upload(t, remote, sealed).isSuccess) ok++ else fail++
                     }
                     uploading = false
                     Toast.makeText(
@@ -235,14 +255,19 @@ fun CameraScreen(onDone: () -> Unit) {
                             )
                             Toast.makeText(context, "Encrypted & secured", Toast.LENGTH_SHORT).show()
 
-                            // Auto-upload only if the box is on AND a token is set.
+                            // Auto-upload only if the box is on, a token is set, AND
+                            // at least one approved recipient exists to encrypt to.
                             val token = prefs.getString("yandex_token", "").orEmpty()
-                            if (prefs.getBoolean("auto_upload", false) && token.isNotBlank()) {
+                            val recipients = RecipientStore.publicBundles(context)
+                            if (prefs.getBoolean("auto_upload", false) &&
+                                token.isNotBlank() && recipients.isNotEmpty()
+                            ) {
                                 scope.launch {
                                     YandexUploader.ensureFolder(token, "/PTI")
-                                    val data = VaultCrypto.decryptFromVault(context, saved)
+                                    val plain = VaultCrypto.decryptFromVault(context, saved)
+                                    val sealed = HybridCrypto.encryptToMany(plain, recipients)
                                     YandexUploader.upload(
-                                        token, "/PTI/${saved.nameWithoutExtension}.jpg", data
+                                        token, "/PTI/${saved.nameWithoutExtension}.ptq", sealed
                                     )
                                 }
                             }
@@ -261,5 +286,94 @@ fun CameraScreen(onDone: () -> Unit) {
                 .align(Alignment.BottomCenter)
                 .padding(32.dp)
         ) { Text("Capture") }
+    }
+}
+
+@Composable
+fun RecipientsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+
+    var entries by remember { mutableStateOf(RecipientStore.list(context)) }
+    var newLabel by remember { mutableStateOf("") }
+    var privateKeyToShow by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+    ) {
+        Text("Who can access the evidence", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Add each trusted person. They receive a private key — give it to them " +
+                "privately (in person or a secure message). Only people on this list can " +
+                "ever decrypt the evidence. Remove someone to revoke their future access."
+        )
+
+        Spacer(Modifier.height(16.dp))
+        OutlinedTextField(
+            value = newLabel,
+            onValueChange = { newLabel = it },
+            label = { Text("Name (e.g. Mom, Lawyer)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = {
+                val recipient = HybridCrypto.generateRecipient()
+                RecipientStore.add(context, newLabel, HybridCrypto.exportPublicKeys(recipient))
+                entries = RecipientStore.list(context)
+                newLabel = ""
+                privateKeyToShow = HybridCrypto.exportPrivateKeys(recipient)
+            }
+        ) { Text("Add person & generate their key") }
+
+        Spacer(Modifier.height(24.dp))
+        if (entries.isEmpty()) {
+            Text("No one added yet.")
+        } else {
+            entries.forEach { entry ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(entry.label, modifier = Modifier.weight(1f))
+                    TextButton(onClick = {
+                        RecipientStore.remove(context, entry.publicBundle)
+                        entries = RecipientStore.list(context)
+                    }) { Text("Revoke") }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        OutlinedButton(onClick = onBack) { Text("Done") }
+    }
+
+    val keyText = privateKeyToShow
+    if (keyText != null) {
+        AlertDialog(
+            onDismissRequest = { privateKeyToShow = null },
+            title = { Text("Private key — give this to the person") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        "Send this privately to the person. They need it to view the " +
+                            "evidence. Never post it publicly. It is not stored anywhere else."
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(keyText, style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    clipboard.setText(AnnotatedString(keyText))
+                    Toast.makeText(context, "Key copied", Toast.LENGTH_SHORT).show()
+                }) { Text("Copy") }
+            },
+            dismissButton = {
+                TextButton(onClick = { privateKeyToShow = null }) { Text("Close") }
+            }
+        )
     }
 }
