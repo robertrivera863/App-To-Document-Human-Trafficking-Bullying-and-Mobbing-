@@ -53,4 +53,10 @@ dependencies {
 
     // Background work for uploads
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // Post-quantum hybrid encryption: X25519 + ML-KEM-768 (BouncyCastle, audited)
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+
+    // Unit tests (run in CI to verify the crypto round-trip)
+    testImplementation("junit:junit:4.13.2")
 }

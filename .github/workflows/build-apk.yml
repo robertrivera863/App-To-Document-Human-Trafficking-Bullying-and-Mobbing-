@@ -29,6 +29,9 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Run crypto unit tests (verifies encrypt/decrypt round-trip)
+        run: gradle testDebugUnitTest --no-daemon --stacktrace
+
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
