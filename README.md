@@ -51,5 +51,10 @@ APK lands in `app/build/outputs/apk/debug/`.
 - A normal app cannot block Android Safe Mode or factory-reset the phone; "wipe"
   refers to securely deleting the app's own encrypted vault.
 
+## Design & architecture
+See **[docs/DESIGN.md](docs/DESIGN.md)** for the full architecture, security model,
+design decisions, and honest limitations.
+
 ## Tech
-Kotlin · Jetpack Compose · CameraX · Google Tink (AES-256-GCM) · GitHub Actions CI
+Kotlin · Jetpack Compose · CameraX · Google Tink (AES-256-GCM) ·
+BouncyCastle (X25519 + ML-KEM-768) · GitHub Actions CI
