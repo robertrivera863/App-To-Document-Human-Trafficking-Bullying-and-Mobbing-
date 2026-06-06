@@ -57,4 +57,4 @@ design decisions, and honest limitations.
 
 ## Tech
 Kotlin · Jetpack Compose · CameraX · Google Tink (AES-256-GCM) ·
-BouncyCastle (X25519 + ML-KEM-768) · GitHub Actions CI
+BouncyCastle (X25519 + ML-KEM-768) · GitHub Actions CI . Decryption code key 77
